@@ -1,0 +1,261 @@
+import random, time, math, turtle
+
+#Screen Setup
+wn = turtle.Screen()
+wn.title("Asteroids av opfino")
+wn.bgcolor("black")
+wn.setup(width=600, height=600)
+wn.tracer(0)
+
+HALF_W = 300
+HALF_H = 300
+
+#Game Setting
+speed_multiplier = 1.0
+last_speed_increase = time.time()
+
+# <<< NEW: rock speed tuning + speedup behavior
+ROCK_BASE_MIN = 0.20       # much slower than before
+ROCK_BASE_MAX = 0.45
+SMALL_SPEED_MULT = 1.15    # small rocks only a bit faster
+SPEEDUP_INTERVAL = 30      # seconds between speed bumps
+SPEEDUP_FACTOR = 1.03      # gentle per-rock scale
+MAX_ROCK_SPEED = 0.90      # optional hard cap (abs)
+
+def clamp(v, limit):        # <<< NEW
+    if v >  limit: return limit
+    if v < -limit: return -limit
+    return v
+
+#Player Setup
+player = turtle.Turtle()
+player.shape("turtle")
+player.color("green")
+player.penup() #So at pílurin ongar linjur teknar meðan man flytur seg
+player.goto(0, 0) #Spawn
+player.setheading(90) #Point Up when Spawned
+
+#Movement Variables"
+velocity_x = 0
+velocity_y = 0
+acceleration = 0.2
+turn_step = 15
+
+lasers = []       ## list of turtle.Turtle bullets
+LASER_SPEED = 8
+LASER_LIFETIME = 90 #Frames
+
+def fire_laser():
+    laser = turtle.Turtle(visible=False)
+    laser.shape("square")
+    laser.shapesize(stretch_wid=0.2, stretch_len=0.6)
+    laser.color("red")
+    laser.penup()
+    laser.setheading(player.heading())
+    laser.goto(player.xcor(), player.ycor())
+    laser.frame_age = 0 #custom attribute to time-to-live
+    laser.showturtle()
+    lasers.append(laser)
+
+def update_lasers():
+    global lasers
+    alive = []
+    for projectile in lasers:
+        projectile.forward(LASER_SPEED)
+        projectile.frame_age += 1
+        x, y = projectile.xcor(), projectile.ycor()
+        if (-HALF_W-10 <= x <= HALF_W+10 and
+            -HALF_H-10 <= y <= HALF_H+10 and
+            projectile.frame_age < LASER_LIFETIME):
+            alive.append(projectile)
+        else:
+            projectile.hideturtle()
+            projectile.clear()
+            projectile.goto(1000, 1000)
+    lasers = alive  # <-- correctly placed & indented
+
+def thrust_forward():
+    global velocity_x, velocity_y
+    ang = math.radians(player.heading())
+    velocity_x += acceleration * math.cos(ang)
+    velocity_y += acceleration * math.sin(ang)
+
+def subtract_backwards():
+    global velocity_x, velocity_y
+    ang = math.radians(player.heading())
+    velocity_x += acceleration * math.cos(ang)
+    velocity_y += acceleration * math.sin(ang)
+
+def turn_left():
+    player.left(turn_step)
+
+def turn_right():
+    player.right(turn_step)
+
+#Keyboard Binding
+wn.listen()
+wn.onkey(thrust_forward, "Up")
+wn.onkeypress(subtract_backwards, "Down")
+wn.onkeypress(turn_left, "Left")
+wn.onkeypress(turn_right, "Right")
+wn.onkey(fire_laser, "space") #Shoot with space
+
+rocks = []
+
+def spawn_rock(size="big", x=None, y=None):
+    """Spawn a rock. size = 'big' or 'small'."""
+    rock = turtle.Turtle(visible=False)
+    rock.shape("circle")
+    rock.color("gray")
+    rock.penup()
+    rock.speed(0)
+    rock.size = size
+
+    if x is None or y is None:
+        # Spawn from edge
+        side = random.choice(["top", "bottom", "left", "right"])
+        if side == "top":
+            x, y = random.uniform(-HALF_W, HALF_W), HALF_H
+        elif side == "bottom":
+            x, y = random.uniform(-HALF_W, HALF_W), -HALF_H
+        elif side == "left":
+            x, y = -HALF_W, random.uniform(-HALF_H, HALF_H)
+        else:  # right
+            x, y = HALF_W, random.uniform(-HALF_H, HALF_H)
+
+    rock.goto(x, y)
+
+    # Aim toward center with some randomness
+    base_angle = math.degrees(math.atan2(-y, -x))
+    angle = base_angle + random.uniform(-25, 25)
+    rock.setheading(angle)
+
+    # Velocity
+    speed = random.uniform(1.5, 3.0) * speed_multiplier
+    if size == "small":
+        speed *= 1.5  # small rocks move faster
+        rock.shapesize(0.7, 0.7)
+
+    ang = math.radians(angle)
+    rock.dx = speed * math.cos(ang)
+    rock.dy = speed * math.sin(ang)
+
+    rock.showturtle()
+    rocks.append(rock)
+
+def remove_rock(rock):
+    rock.hideturtle()
+    rock.clear()
+    rock.goto(1000, 1000)
+    if rock in rocks:
+        rocks.remove(rock)
+
+def update_rocks():
+    global speed_multiplier, last_speed_increase
+    # <<< NEW: gentler, less frequent speed-up
+    if time.time() - last_speed_increase > SPEEDUP_INTERVAL:
+        speed_multiplier += 0.05
+        last_speed_increase = time.time()
+        for r in rocks:
+            r.dx *= SPEEDUP_FACTOR
+            r.dy *= SPEEDUP_FACTOR
+            # optional clamp on boost
+            r.dx = clamp(r.dx, MAX_ROCK_SPEED)
+            r.dy = clamp(r.dy, MAX_ROCK_SPEED)
+
+    for r in rocks:
+        r.setx(r.xcor() + r.dx)
+        r.sety(r.ycor() + r.dy)
+
+        # Screen Wrapping
+        if r.xcor() >  HALF_W: r.setx(-HALF_W)
+        if r.xcor() < -HALF_W: r.setx( HALF_W)
+        if r.ycor() >  HALF_H: r.sety(-HALF_H)
+        if r.ycor() < -HALF_H: r.sety( HALF_H)
+
+        # <<< NEW: hard cap every frame (belt & suspenders)
+        r.dx = clamp(r.dx, MAX_ROCK_SPEED)
+        r.dy = clamp(r.dy, MAX_ROCK_SPEED)
+
+# spawn a few at start + timer for new ones
+for _ in range(3):
+    spawn_rock("big")
+
+def spawn_timer():
+    spawn_rock("big")
+    turtle.ontimer(spawn_timer, 5000)  # every 5 seconds
+spawn_timer()
+
+#Create a turtle for the score display
+score = 0
+score_turtle = turtle.Turtle()
+score_turtle.hideturtle()
+score_turtle.penup()
+score_turtle.color("white")
+
+def update_score():
+    score_turtle.clear()
+    score_turtle.goto(250,260)
+    score_turtle.write(f"score: {score}", align="right", font=("Arial", 18,"bold"))
+
+update_score()
+
+# --- Main Loop ---
+while True:
+    # update position with momentum
+    player.setx(player.xcor() + velocity_x)
+    player.sety(player.ycor() + velocity_y)
+
+    # optional drag to keep speeds sane
+    velocity_x *= 0.995
+    velocity_y *= 0.995
+
+    # Screen Wrapping
+    if player.xcor() >  HALF_W: player.setx(-HALF_W)
+    elif player.xcor() < -HALF_W: player.setx( HALF_W)
+    if player.ycor() >  HALF_H: player.sety(-HALF_H)
+    elif player.ycor() < -HALF_H: player.sety( HALF_H)
+
+    # updates
+    update_lasers()
+    update_rocks()
+
+    # --- COLLISIONS ---
+    # Laser vs Rock
+    for laser in lasers[:]:
+        for rock in rocks[:]:
+            hit_radius = 18 if rock.size == "big" else 12
+            if laser.distance(rock) < hit_radius:
+                # remove laser
+                laser.hideturtle()
+                if laser in lasers:
+                    lasers.remove(laser)
+
+                # handle rock
+                if rock.size == "big":
+                    # split into 2 small rocks
+                    spawn_rock("small", rock.xcor(), rock.ycor())
+                    spawn_rock("small", rock.xcor(), rock.ycor())
+                    remove_rock(rock)
+                    score += 100
+                else:
+                    # small rock
+                    remove_rock(rock)
+                    score += 50
+                update_score()
+                break  # stop checking other rocks for this laser
+
+    # Player vs Rock
+    for rock in rocks:
+        if player.distance(rock) < 18:
+            print("Player hit!")  # placeholder action
+            player.goto(0, 0)
+            velocity_x = 0
+            velocity_y = 0
+            score = 0
+            update_score()
+            break
+
+    wn.update()
+
+    time.sleep(0.016)  # <<< NEW: frame cap (~60 FPS). Use 0.02 or 0.033 for slower.
